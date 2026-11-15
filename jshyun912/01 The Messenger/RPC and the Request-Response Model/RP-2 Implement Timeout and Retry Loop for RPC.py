@@ -45,12 +45,29 @@ class Node:
             self.pending.pop(msg_id, None)
             return self.replies.pop(msg_id, None)
 
-    def rpc_with_retry(self, dest, body, first_msg_id, timeout=0.5, max_retries=3):
-        # TODO: Implement the retry loop
-        # The first attempt (first_msg_id) was already sent by the reading loop;
-        # wait for it, and send each retry with send_rpc (a new msg_id).
-        # Return (result, attempts) tuple
-        pass
+    def rpc_with_retry(self, dest, body, timeout=0.5, max_retries=3):
+        for attempt in range(1, max_retries + 1):
+            msg_id = self.send_rpc(body["target"], body["payload"])
+
+            result = self.wait_reply(msg_id, timeout)
+
+            if result is None: continue
+            
+            result = {
+                "type": "relay_ok",
+                "attempts": attempt,
+                "result": result
+            }
+
+            break
+        else:
+            result = {
+                "type": "error",
+                "code": 0,
+                "text": "RPC failed after 3 attempts"
+                }
+
+        self.reply(dest, result)
 
     def handle_reply(self, body):
         reply_to = body.get("in_reply_to")
@@ -77,12 +94,7 @@ def main():
         elif msg_type == "echo":
             node.reply(message, {"type": "echo_ok", "echo": body["echo"]})
         elif msg_type == "relay":
-            # The request body has: target, payload.
-            #   "error": code, text.
-            #   "relay_ok": attempts, result.
-            # TODO: Send the first attempt to the target with send_rpc here,
-            # then run rpc_with_retry and answer the caller on a new thread
-            pass
+            threading.Thread(target=node.rpc_with_retry, args=(message, body)).start()
         else:
             node.handle_reply(body)
 
